@@ -12,20 +12,28 @@ import {
   Pencil,
   X,
   Save,
-  FileText
+  FileText,
+  Trash2,
+  MessageSquare
 } from 'lucide-react';
 import { SFFData, SFFField, SelectionContext } from '../types';
 
 interface ConflictResolverProps {
   data: SFFData | null;
   onUpdateField: (fieldId: string, newValue: any, isResolved: boolean) => void;
+  onUpdateComment: (fieldId: string, comment: string) => void;
   onHoverAlternative: (context: SelectionContext | null) => void;
+  onDeleteSection: (sectionName: string) => void;
+  onDeleteField: (fieldId: string) => void;
 }
 
 export const ConflictResolver: React.FC<ConflictResolverProps> = ({ 
   data, 
   onUpdateField,
-  onHoverAlternative
+  onUpdateComment,
+  onHoverAlternative,
+  onDeleteSection,
+  onDeleteField
 }) => {
   const [activeSection, setActiveSection] = useState<string | null>(null);
 
@@ -52,8 +60,26 @@ export const ConflictResolver: React.FC<ConflictResolverProps> = ({
                 {fields.some(f => f.confidence === 'Low' && !f.isResolved) && (
                   <span className="px-2 py-0.5 rounded text-xs font-medium bg-rose-100 text-rose-700">Needs Review</span>
                 )}
+                {fields.some(f => f.confidence === 'Medium' && !f.isResolved) && (
+                  <span className="px-2 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-700">Consider Review</span>
+                )}
               </div>
-              {activeSection === sectionName ? <ChevronUp className="w-4 h-4 text-slate-400" /> : <ChevronDown className="w-4 h-4 text-slate-400" />}
+              
+              <div className="flex items-center gap-2 border-l border-slate-300 pl-3 ml-1">
+                <button 
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      e.preventDefault();
+                      onDeleteSection(sectionName);
+                    }}
+                    className="p-1 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
+                    title="Delete Section"
+                >
+                    <Trash2 className="w-4 h-4" />
+                </button>
+                {activeSection === sectionName ? <ChevronUp className="w-4 h-4 text-slate-400" /> : <ChevronDown className="w-4 h-4 text-slate-400" />}
+              </div>
             </div>
           </div>
 
@@ -64,7 +90,9 @@ export const ConflictResolver: React.FC<ConflictResolverProps> = ({
                   key={field.id} 
                   field={field} 
                   onUpdate={onUpdateField}
+                  onUpdateComment={onUpdateComment}
                   onHoverAlternative={onHoverAlternative}
+                  onDelete={onDeleteField}
                 />
               ))}
             </div>
@@ -78,9 +106,12 @@ export const ConflictResolver: React.FC<ConflictResolverProps> = ({
 const FieldRow: React.FC<{
   field: SFFField;
   onUpdate: (id: string, val: any, resolved: boolean) => void;
+  onUpdateComment: (id: string, comment: string) => void;
   onHoverAlternative: (ctx: SelectionContext | null) => void;
-}> = ({ field, onUpdate, onHoverAlternative }) => {
+  onDelete: (id: string) => void;
+}> = ({ field, onUpdate, onUpdateComment, onHoverAlternative, onDelete }) => {
   const [isEditing, setIsEditing] = useState(false);
+  const [showCommentBox, setShowCommentBox] = useState(false);
   const [editValue, setEditValue] = useState(
     typeof field.value === 'object' ? JSON.stringify(field.value) : String(field.value || '')
   );
@@ -127,15 +158,49 @@ const FieldRow: React.FC<{
           <span className="text-sm font-semibold text-slate-800">{field.label}</span>
         </div>
 
-        <div className={`flex items-center gap-1 px-2 py-1 rounded-full text-xs border whitespace-nowrap ${
-          field.confidence === 'Low' ? 'bg-rose-50 border-rose-100 text-rose-700' : 
-          field.confidence === 'Medium' ? 'bg-amber-50 border-amber-100 text-amber-700' :
-          'bg-emerald-50 border-emerald-100 text-emerald-700'
-        }`}>
-          {field.confidence === 'Low' && <AlertTriangle className="w-3 h-3" />}
-          {field.confidence === 'Medium' && <HelpCircle className="w-3 h-3" />}
-          {field.confidence === 'High' && <CheckCircle2 className="w-3 h-3" />}
-          <span>{field.confidence}</span>
+        <div className="flex items-center gap-3">
+          <div className={`flex items-center gap-1 px-2 py-1 rounded-full text-xs border whitespace-nowrap ${
+            field.confidence === 'Low' ? 'bg-rose-50 border-rose-100 text-rose-700' : 
+            field.confidence === 'Medium' ? 'bg-amber-50 border-amber-100 text-amber-700' :
+            'bg-emerald-50 border-emerald-100 text-emerald-700'
+          }`}>
+            {field.confidence === 'Low' && <AlertTriangle className="w-3 h-3" />}
+            {field.confidence === 'Medium' && <HelpCircle className="w-3 h-3" />}
+            {field.confidence === 'High' && <CheckCircle2 className="w-3 h-3" />}
+            <span>{field.confidence}</span>
+          </div>
+
+          <div className="flex items-center gap-1 border-l border-slate-200 pl-2">
+              <button 
+                type="button"
+                onClick={(e) => {
+                    e.stopPropagation();
+                    e.preventDefault();
+                    setShowCommentBox(!showCommentBox);
+                }}
+                className={`p-1.5 rounded transition-colors ${
+                  field.comment 
+                    ? 'text-yellow-600 bg-yellow-100 hover:bg-yellow-200' 
+                    : 'text-slate-300 hover:text-blue-500 hover:bg-blue-50'
+                }`}
+                title="Add/Edit Comment"
+              >
+                <MessageSquare className="w-3.5 h-3.5" />
+              </button>
+
+              <button 
+                type="button"
+                onClick={(e) => {
+                    e.stopPropagation();
+                    e.preventDefault();
+                    onDelete(field.id);
+                }}
+                className="p-1.5 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded transition-colors"
+                title="Delete Field"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+              </button>
+          </div>
         </div>
       </div>
 
@@ -203,6 +268,26 @@ const FieldRow: React.FC<{
                   )}
                </div>
                
+               {/* Comment Section */}
+               {(showCommentBox || field.comment) && (
+                 <div className="mt-3 animate-in fade-in slide-in-from-top-2">
+                   <div className="bg-yellow-50/50 border border-yellow-200 rounded-lg p-3">
+                     <div className="flex items-start gap-2">
+                        <MessageSquare className="w-4 h-4 text-yellow-500 mt-1 flex-shrink-0" />
+                        <div className="flex-1">
+                          <label className="block text-[10px] font-bold text-yellow-700 uppercase mb-1">Reviewer Comment</label>
+                          <textarea
+                            value={field.comment || ''}
+                            onChange={(e) => onUpdateComment(field.id, e.target.value)}
+                            placeholder="Add your note here..."
+                            className="w-full text-sm bg-white border border-yellow-300 rounded p-2 focus:outline-none focus:ring-2 focus:ring-yellow-400 min-h-[60px]"
+                          />
+                        </div>
+                     </div>
+                   </div>
+                 </div>
+               )}
+
                {/* Alternatives Section (Only if conflict) */}
                {(isConflict) && (
                  <div className="space-y-3 mt-3 animate-in fade-in slide-in-from-top-2 duration-300">

@@ -89,7 +89,8 @@ const parseSffData = (json: any, fileName: string): SFFData => {
         confidence: normalizeConfidence(node.confidence),
         alternatives: alternatives,
         isResolved: false,
-        source: mainSource
+        source: mainSource,
+        comment: node.comment || undefined // Load existing comment if any
       });
       return;
     }
@@ -105,7 +106,7 @@ const parseSffData = (json: any, fileName: string): SFFData => {
     // Recursion: Object
     Object.keys(node).forEach(key => {
       // Skip metadata keys of the field itself
-      if (['confidence', 'source_details', 'alternatives'].includes(key)) return;
+      if (['confidence', 'source_details', 'alternatives', 'comment'].includes(key)) return;
       
       const newPath = pathPrefix ? `${pathPrefix}.${key}` : key;
       const newKey = keyPrefix ? `${keyPrefix}.${key}` : key;
@@ -191,26 +192,16 @@ const parseSffData = (json: any, fileName: string): SFFData => {
 
 // --- Safe Set Value Helper ---
 const setByPath = (obj: any, path: string, value: any) => {
-  // Handle array indexing like [0].key or key[0].key
-  // Remove leading dot if any
   if (path.startsWith('.')) path = path.slice(1);
-  
-  // Regex to match keys: either "word" or "[index]"
   const keys = path.match(/([^[.\]]+|\[\d+\])/g);
-  
   if (!keys) return;
 
   let current = obj;
   for (let i = 0; i < keys.length - 1; i++) {
     let key = keys[i];
-    
-    // If key is [0], treat it as array index
     if (key.startsWith('[') && key.endsWith(']')) {
       const index = parseInt(key.slice(1, -1), 10);
-      // Ensure array existence
-      if (!Array.isArray(current)) {
-         // Should have been array, but strictly following existing structure so we assume it exists
-      }
+      if (!Array.isArray(current)) { /* assume exists */ }
       current = current[index];
     } else {
       if (!current[key]) current[key] = {};
@@ -224,6 +215,33 @@ const setByPath = (obj: any, path: string, value: any) => {
      current[index] = value;
   } else {
      current[lastKey] = value;
+  }
+};
+
+// --- Helper to Delete Property by Path (For Cleaning Deletions) ---
+const deleteByPath = (obj: any, path: string) => {
+  if (path.startsWith('.')) path = path.slice(1);
+  const keys = path.match(/([^[.\]]+|\[\d+\])/g);
+  if (!keys) return;
+
+  const lastKey = keys.pop();
+  if (!lastKey) return;
+
+  let current = obj;
+  for (const key of keys) {
+     if (key.startsWith('[') && key.endsWith(']')) {
+        const index = parseInt(key.slice(1, -1), 10);
+        if (current[index] === undefined) return;
+        current = current[index];
+     } else {
+        if (current[key] === undefined) return;
+        current = current[key];
+     }
+  }
+
+  // Only delete object properties. Avoid splicing arrays by index to prevent shifts.
+  if (!(lastKey.startsWith('[') && lastKey.endsWith(']'))) {
+      if (current) delete current[lastKey];
   }
 };
 
@@ -313,28 +331,99 @@ function App() {
     });
   };
 
+  const handleUpdateComment = (fieldId: string, comment: string) => {
+    if (!sffData) return;
+    
+    setSffData({
+      ...sffData,
+      fields: sffData.fields.map(field => 
+        field.id === fieldId 
+          ? { ...field, comment } 
+          : field
+      )
+    });
+  };
+
+  const handleDeleteField = (fieldId: string) => {
+    if (!sffData) return;
+    // Removed confirmation for faster workflow ("I want it to disappear")
+    setSffData(prev => prev ? ({
+      ...prev,
+      fields: prev.fields.filter(f => f.id !== fieldId)
+    }) : null);
+  };
+
+  const handleDeleteSection = (sectionName: string) => {
+    if (!sffData) return;
+    // Removed confirmation for immediate deletion as requested
+    setSffData(prev => prev ? ({
+      ...prev,
+      fields: prev.fields.filter(f => (f.section || "General") !== sectionName)
+    }) : null);
+  };
+
   const handleDownload = () => {
     if (!sffData || !sffData.originalJson) return;
     
     // 1. Deep clone the original JSON
     const clonedJson = JSON.parse(JSON.stringify(sffData.originalJson));
 
-    // 2. Iterate and update
+    // 2. Identify and Remove Deleted Fields
+    // We re-parse the original JSON to know what fields SHOULD be there originally.
+    const originalState = parseSffData(sffData.originalJson, "temp");
+    const currentPathSet = new Set(sffData.fields.map(f => f.path));
+
+    // Find fields that were in original but are missing in current sffData
+    const deletedFields = originalState.fields.filter(f => !currentPathSet.has(f.path));
+    
+    deletedFields.forEach(f => {
+       deleteByPath(clonedJson, f.path);
+    });
+
+    // 3. Prune Sections (Arrays) if they are now empty or their section was removed
+    // We iterate through known top-level arrays and keep only items that still have fields in sffData.
+    const arraySections = ['units', 'streams', 'chemicals'];
+    arraySections.forEach(sectionKey => {
+       if (Array.isArray(clonedJson[sectionKey])) {
+          clonedJson[sectionKey] = clonedJson[sectionKey].filter((_item: any, index: number) => {
+             // If any field in current sffData starts with "units[index]", keep the item.
+             const prefix = `${sectionKey}[${index}]`;
+             return sffData.fields.some(f => f.path.startsWith(prefix));
+          });
+       }
+    });
+
+    // Handle utilities separately as it might be an object of arrays
+    if (clonedJson.utilities && typeof clonedJson.utilities === 'object') {
+       Object.keys(clonedJson.utilities).forEach(utilType => {
+           if (Array.isArray(clonedJson.utilities[utilType])) {
+               clonedJson.utilities[utilType] = clonedJson.utilities[utilType].filter((_: any, index: number) => {
+                   const prefix = `utilities.${utilType}[${index}]`;
+                   return sffData.fields.some(f => f.path.startsWith(prefix));
+               });
+           }
+       });
+    }
+
+    // 4. Update Values and Comments
     sffData.fields.forEach(field => {
-      // If field was touched (resolved) or value changed
+      // FIX: Write comment if present, regardless of resolution status
+      if (field.comment && !cleanExport) {
+         setByPath(clonedJson, field.path + ".comment", field.comment);
+      }
+
       if (field.isResolved) {
          // Update Value
          setByPath(clonedJson, field.path + ".value", field.value);
          
          // Mark as reviewed
-         // Only add 'reviewed: true' if clean export is NOT selected
          if (!cleanExport) {
             setByPath(clonedJson, field.path + ".reviewed", true);
          }
       }
     });
 
-    // 3. Clean properties if requested
+    // 5. Clean properties if requested
     if (cleanExport) {
         const removeKeys = (obj: any, keys: string[]) => {
              if (typeof obj !== 'object' || obj === null) return;
@@ -347,8 +436,8 @@ function App() {
              });
              Object.keys(obj).forEach(k => removeKeys(obj[k], keys));
         };
-        // Remove 'alternatives' and 'reviewed'
-        removeKeys(clonedJson, ['alternatives', 'reviewed']);
+        // Remove 'alternatives', 'reviewed', and 'comment'
+        removeKeys(clonedJson, ['alternatives', 'reviewed', 'comment']);
     }
 
     const jsonString = JSON.stringify(clonedJson, null, 2);
@@ -588,7 +677,10 @@ function App() {
               <ConflictResolver 
                 data={sffData} 
                 onUpdateField={handleUpdateField}
+                onUpdateComment={handleUpdateComment}
                 onHoverAlternative={setSelectionContext}
+                onDeleteSection={handleDeleteSection}
+                onDeleteField={handleDeleteField}
               />
             )}
           </div>

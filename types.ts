@@ -25,6 +25,7 @@ export interface SFFField<T = any> {
   isResolved: boolean; // Has the human approved this?
   section: string; // e.g., "Metadata", "Unit: P-13/V-102"
   source?: SourceReference; // Source for the CURRENT value (important for Medium confidence)
+  comment?: string; // Reviewer comments
 }
 
 export interface SFFData {
