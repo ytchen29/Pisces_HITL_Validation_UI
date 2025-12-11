@@ -1,0 +1,5 @@
+{
+  "name": "PISCES HITL Resolver",
+  "description": "A Human-in-the-Loop interface for validating bioprocess data extraction. Allows experts to review multi-agent consensus, resolve low-confidence conflicts, and view source context alongside the extracted Standardized Flowsheet Format (SFF).",
+  "requestFramePermissions": []
+}
