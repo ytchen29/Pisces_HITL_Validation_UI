@@ -218,30 +218,32 @@ const setByPath = (obj: any, path: string, value: any) => {
   }
 };
 
-// --- Helper to Delete Property by Path (For Cleaning Deletions) ---
+// --- Updated Helper to Delete Property by Path (Robust) ---
 const deleteByPath = (obj: any, path: string) => {
-  if (path.startsWith('.')) path = path.slice(1);
-  const keys = path.match(/([^[.\]]+|\[\d+\])/g);
-  if (!keys) return;
-
-  const lastKey = keys.pop();
-  if (!lastKey) return;
-
+  // Normalize path to dot notation: "a[0].b" -> "a.0.b"
+  const parts = path.replace(/\[(\d+)\]/g, '.$1').split('.').filter(p => p);
+  
+  if (parts.length === 0) return;
+  const lastKey = parts.pop();
+  
   let current = obj;
-  for (const key of keys) {
-     if (key.startsWith('[') && key.endsWith(']')) {
-        const index = parseInt(key.slice(1, -1), 10);
-        if (current[index] === undefined) return;
-        current = current[index];
-     } else {
-        if (current[key] === undefined) return;
-        current = current[key];
-     }
+  for (const key of parts) {
+      if (current && typeof current === 'object' && key in current) {
+          current = current[key];
+      } else {
+          // Path does not exist in object
+          return;
+      }
   }
-
-  // Only delete object properties. Avoid splicing arrays by index to prevent shifts.
-  if (!(lastKey.startsWith('[') && lastKey.endsWith(']'))) {
-      if (current) delete current[lastKey];
+  
+  if (current && typeof current === 'object' && lastKey) {
+      // If we are deleting from an array, 'delete' leaves a hole (undefined/empty).
+      // This is acceptable as the pruning step will filter empty items.
+      if (Array.isArray(current)) {
+          delete current[lastKey as any];
+      } else {
+          delete current[lastKey];
+      }
   }
 };
 
@@ -368,6 +370,10 @@ function App() {
     // 1. Deep clone the original JSON
     const clonedJson = JSON.parse(JSON.stringify(sffData.originalJson));
 
+    // Determine root object/array for pruning
+    const isRootArray = Array.isArray(clonedJson);
+    const root = isRootArray ? clonedJson[0] : clonedJson;
+
     // 2. Identify and Remove Deleted Fields
     // We re-parse the original JSON to know what fields SHOULD be there originally.
     const originalState = parseSffData(sffData.originalJson, "temp");
@@ -383,26 +389,56 @@ function App() {
     // 3. Prune Sections (Arrays) if they are now empty or their section was removed
     // We iterate through known top-level arrays and keep only items that still have fields in sffData.
     const arraySections = ['units', 'streams', 'chemicals'];
-    arraySections.forEach(sectionKey => {
-       if (Array.isArray(clonedJson[sectionKey])) {
-          clonedJson[sectionKey] = clonedJson[sectionKey].filter((_item: any, index: number) => {
-             // If any field in current sffData starts with "units[index]", keep the item.
-             const prefix = `${sectionKey}[${index}]`;
-             return sffData.fields.some(f => f.path.startsWith(prefix));
-          });
-       }
-    });
+    
+    if (root) {
+        arraySections.forEach(sectionKey => {
+           if (Array.isArray(root[sectionKey])) {
+              root[sectionKey] = root[sectionKey].filter((_item: any, index: number) => {
+                 // Construct prefix to match how parseSffData constructs it
+                 const prefix = isRootArray 
+                    ? `[0].${sectionKey}[${index}]` 
+                    : `${sectionKey}[${index}]`;
+                 
+                 // If any field in current sffData starts with this prefix, keep the item.
+                 // Otherwise, it implies all fields for this item were deleted (or section deleted), so prune it.
+                 return sffData.fields.some(f => f.path.startsWith(prefix));
+              });
 
-    // Handle utilities separately as it might be an object of arrays
-    if (clonedJson.utilities && typeof clonedJson.utilities === 'object') {
-       Object.keys(clonedJson.utilities).forEach(utilType => {
-           if (Array.isArray(clonedJson.utilities[utilType])) {
-               clonedJson.utilities[utilType] = clonedJson.utilities[utilType].filter((_: any, index: number) => {
-                   const prefix = `utilities.${utilType}[${index}]`;
-                   return sffData.fields.some(f => f.path.startsWith(prefix));
-               });
+              // If the section array is empty, remove the section entirely
+              if (root[sectionKey].length === 0) {
+                  delete root[sectionKey];
+              }
            }
-       });
+        });
+    
+        // Handle utilities separately as it might be an object of arrays
+        if (root.utilities && typeof root.utilities === 'object') {
+           Object.keys(root.utilities).forEach(utilType => {
+               if (Array.isArray(root.utilities[utilType])) {
+                   root.utilities[utilType] = root.utilities[utilType].filter((_: any, index: number) => {
+                       const prefix = isRootArray 
+                          ? `[0].utilities.${utilType}[${index}]` 
+                          : `utilities.${utilType}[${index}]`;
+                       return sffData.fields.some(f => f.path.startsWith(prefix));
+                   });
+
+                   // If the utility array is empty, remove this utility type
+                   if (root.utilities[utilType].length === 0) {
+                       delete root.utilities[utilType];
+                   }
+               }
+           });
+
+           // If utilities object is empty after cleaning arrays, remove it entirely
+           if (Object.keys(root.utilities).length === 0) {
+               delete root.utilities;
+           }
+        }
+
+        // Prune Metadata if it becomes empty
+        if (root.metadata && Object.keys(root.metadata).length === 0) {
+            delete root.metadata;
+        }
     }
 
     // 4. Update Values and Comments
