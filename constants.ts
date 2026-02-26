@@ -24,6 +24,7 @@ const MOCK_ORIGINAL_JSON = {
 // Simulating the output from the "Resolver Agent" (Slide 21/23)
 export const MOCK_SFF_DATA: SFFData = {
   fileName: "BioProcess_Optimization_Study_v4.pdf",
+  reviewerId: "Reviewer_A",
   originalJson: MOCK_ORIGINAL_JSON,
   fields: [
     {
@@ -34,7 +35,12 @@ export const MOCK_SFF_DATA: SFFData = {
       label: "Paper Title",
       value: "Optimization of Ethanol Production from Corn Stover",
       confidence: "High",
+      confidenceDescription: "Perfect string match across all active agents and verified against title block formatting.",
       isResolved: true,
+      reviewedBy: ["Reviewer_00", "Reviewer_A"],
+      comments: [
+        { reviewer: "Reviewer_00", text: "Confirmed from primary abstract header." }
+      ],
       alternatives: [
         {
           agentName: "Gemini 2.5 Pro",
@@ -56,7 +62,10 @@ export const MOCK_SFF_DATA: SFFData = {
       label: "Authors",
       value: ["Y. Zhang", "T. Smith"],
       confidence: "Medium",
+      confidenceDescription: "Names extracted correctly, but agent E2 missed the middle initial 'Y'. Ambiguity in formatting of 'Zhang, Y.'.",
       isResolved: false,
+      reviewedBy: [],
+      comments: [],
       alternatives: [
         {
           agentName: "Gemini 2.5 Pro",
@@ -78,7 +87,12 @@ export const MOCK_SFF_DATA: SFFData = {
       label: "Operating Volume",
       value: "500 L",
       confidence: "Low",
+      confidenceDescription: "Conflict between text extraction (500L) and Table 2 (600L). Table 2 might refer to total capacity while text refers to working volume.",
       isResolved: false,
+      reviewedBy: ["Junior_Analyst_09"],
+      comments: [
+        { reviewer: "Junior_Analyst_09", text: "Checked Table 2, but the text on page 4 says 500L." }
+      ],
       alternatives: [
         {
           agentName: "Gemini 2.5 Pro",
@@ -116,7 +130,10 @@ export const MOCK_SFF_DATA: SFFData = {
       label: "Temperature",
       value: "32°C",
       confidence: "High",
+      confidenceDescription: "Explicit statement found in Methods and confirmed in experimental result labels.",
       isResolved: true,
+      reviewedBy: ["Reviewer_A"],
+      comments: [],
       alternatives: [
         {
           agentName: "Consensus",
@@ -133,7 +150,10 @@ export const MOCK_SFF_DATA: SFFData = {
       label: "Mass Flow Rate",
       value: "12.5 kg/h",
       confidence: "Low",
+      confidenceDescription: "Unit ambiguity: One agent extracted kg/h, another assumed L/h based on liquid state without explicit unit verification.",
       isResolved: false,
+      reviewedBy: [],
+      comments: [],
       alternatives: [
         {
           agentName: "Gemini 2.5 Pro",
